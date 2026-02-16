@@ -115,7 +115,7 @@ async def run_bot(cfg: BotConfig) -> None:
 
                 if not risk.approved and (now - runtime.last_skip_log).total_seconds() >= 5:
                     LOGGER.info(
-                        "no-trade asset=%s ticker=%s risk=%s signal=%s/%s signal_reasons=%s spread=%s depth=%s/%s beat=%s spot=%s rsi1=%s macd1=%s rsi15=%s macd15=%s",
+                        "no-trade asset=%s ticker=%s risk=%s signal=%s/%s signal_reasons=%s spread=%s depth=%s/%s beat=%s spot=%s rsi1=%s macd1=%s rsi5=%s macd5=%s rsi15=%s macd15=%s",
                         runtime.asset,
                         ticker,
                         ",".join(risk.reasons) if risk.reasons else "unknown",
@@ -129,6 +129,8 @@ async def run_bot(cfg: BotConfig) -> None:
                         f"{spot_price:.2f}" if spot_price is not None else "na",
                         f"{ta_features.rsi:.1f}" if ta_features is not None else "na",
                         f"{ta_features.macd_hist:.4f}" if ta_features is not None else "na",
+                        f"{ta_features.rsi_5m:.1f}" if ta_features is not None else "na",
+                        f"{ta_features.macd_hist_5m:.4f}" if ta_features is not None else "na",
                         f"{ta_features.rsi_15m:.1f}" if ta_features is not None else "na",
                         f"{ta_features.macd_hist_15m:.4f}" if ta_features is not None else "na",
                     )

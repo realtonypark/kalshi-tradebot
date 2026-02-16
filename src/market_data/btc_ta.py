@@ -21,6 +21,12 @@ class TAFeatures:
     rsi: float
     momentum_5m: float
     volatility_1m: float
+    ema_fast_5m: float = 0.0
+    ema_slow_5m: float = 0.0
+    macd_hist_5m: float = 0.0
+    rsi_5m: float = 50.0
+    momentum_5m_tf: float = 0.0
+    volatility_5m: float = 0.0
     ema_fast_15m: float = 0.0
     ema_slow_15m: float = 0.0
     macd_hist_15m: float = 0.0
@@ -47,10 +53,10 @@ class BtcTechnicalFeed:
 
         for fetcher in (self._from_binance, self._from_coinbase):
             try:
-                closes_1m, closes_15m = await fetcher()
+                closes_1m, closes_5m, closes_15m = await fetcher()
                 if len(closes_1m) < 40:
                     continue
-                features = _compute_features(closes_1m, closes_15m)
+                features = _compute_features(closes_1m, closes_15m, closes_5m)
                 self._cached = features
                 self._last_fetch = now
                 return features
@@ -59,7 +65,7 @@ class BtcTechnicalFeed:
 
         return self._cached
 
-    async def _from_binance(self) -> tuple[list[float], list[float]]:
+    async def _from_binance(self) -> tuple[list[float], list[float], list[float]]:
         pair = f"{self.symbol}USDT"
         res_1m = await self._client.get(
             "https://api.binance.com/api/v3/klines",
@@ -69,6 +75,14 @@ class BtcTechnicalFeed:
         rows_1m = res_1m.json()
         closes_1m = [float(r[4]) for r in rows_1m]
 
+        res_5m = await self._client.get(
+            "https://api.binance.com/api/v3/klines",
+            params={"symbol": pair, "interval": "5m", "limit": 120},
+        )
+        res_5m.raise_for_status()
+        rows_5m = res_5m.json()
+        closes_5m = [float(r[4]) for r in rows_5m]
+
         res_15m = await self._client.get(
             "https://api.binance.com/api/v3/klines",
             params={"symbol": pair, "interval": "15m", "limit": 120},
@@ -76,9 +90,9 @@ class BtcTechnicalFeed:
         res_15m.raise_for_status()
         rows_15m = res_15m.json()
         closes_15m = [float(r[4]) for r in rows_15m]
-        return closes_1m, closes_15m
+        return closes_1m, closes_5m, closes_15m
 
-    async def _from_coinbase(self) -> tuple[list[float], list[float]]:
+    async def _from_coinbase(self) -> tuple[list[float], list[float], list[float]]:
         product = f"{self.symbol}-USD"
         res_1m = await self._client.get(
             f"https://api.exchange.coinbase.com/products/{product}/candles",
@@ -91,6 +105,17 @@ class BtcTechnicalFeed:
         rows_1m.sort(key=lambda r: r[0])
         closes_1m = [float(r[4]) for r in rows_1m]
 
+        res_5m = await self._client.get(
+            f"https://api.exchange.coinbase.com/products/{product}/candles",
+            params={"granularity": 300, "limit": 120},
+        )
+        res_5m.raise_for_status()
+        rows_5m = res_5m.json()
+        if not isinstance(rows_5m, list):
+            raise ValueError("coinbase 5m candles invalid")
+        rows_5m.sort(key=lambda r: r[0])
+        closes_5m = [float(r[4]) for r in rows_5m]
+
         res_15m = await self._client.get(
             f"https://api.exchange.coinbase.com/products/{product}/candles",
             params={"granularity": 900, "limit": 120},
@@ -101,10 +126,14 @@ class BtcTechnicalFeed:
             raise ValueError("coinbase 15m candles invalid")
         rows_15m.sort(key=lambda r: r[0])
         closes_15m = [float(r[4]) for r in rows_15m]
-        return closes_1m, closes_15m
+        return closes_1m, closes_5m, closes_15m
 
 
-def _compute_features(closes_1m: list[float], closes_15m: list[float]) -> TAFeatures:
+def _compute_features(
+    closes_1m: list[float],
+    closes_15m: list[float],
+    closes_5m: list[float] | None = None,
+) -> TAFeatures:
     now = datetime.now(timezone.utc)
     spot = closes_1m[-1]
     ema_fast = _ema(closes_1m, 12)
@@ -128,6 +157,21 @@ def _compute_features(closes_1m: list[float], closes_15m: list[float]) -> TAFeat
             returns.append((cur - prev) / prev)
     volatility = _stdev(returns) if returns else 0.0
 
+    if not closes_5m or len(closes_5m) < 30:
+        closes_5m = _downsample_to_5m(closes_1m)
+    ema_fast_5m = _ema(closes_5m, 8) if closes_5m else spot
+    ema_slow_5m = _ema(closes_5m, 21) if closes_5m else spot
+    macd_hist_5m = _macd_hist(closes_5m, 8, 21, 9) if closes_5m else 0.0
+    rsi_5m = _rsi(closes_5m, 14) if closes_5m else 50.0
+    momentum_5m_tf = closes_5m[-1] - closes_5m[-5] if len(closes_5m) >= 5 else 0.0
+    returns_5m = []
+    for i in range(1, min(len(closes_5m), 25)):
+        prev = closes_5m[-i - 1]
+        cur = closes_5m[-i]
+        if prev > 0:
+            returns_5m.append((cur - prev) / prev)
+    volatility_5m = _stdev(returns_5m) if returns_5m else 0.0
+
     if len(closes_15m) < 30:
         closes_15m = _downsample_to_15m(closes_1m)
     ema_fast_15m = _ema(closes_15m, 8) if closes_15m else spot
@@ -144,6 +188,12 @@ def _compute_features(closes_1m: list[float], closes_15m: list[float]) -> TAFeat
         rsi=rsi,
         momentum_5m=momentum_5m,
         volatility_1m=volatility,
+        ema_fast_5m=ema_fast_5m,
+        ema_slow_5m=ema_slow_5m,
+        macd_hist_5m=macd_hist_5m,
+        rsi_5m=rsi_5m,
+        momentum_5m_tf=momentum_5m_tf,
+        volatility_5m=volatility_5m,
         ema_fast_15m=ema_fast_15m,
         ema_slow_15m=ema_slow_15m,
         macd_hist_15m=macd_hist_15m,
@@ -169,6 +219,15 @@ def _downsample_to_15m(closes_1m: list[float]) -> list[float]:
         return closes_1m[:]
     out: list[float] = []
     for i in range(14, len(closes_1m), 15):
+        out.append(closes_1m[i])
+    return out
+
+
+def _downsample_to_5m(closes_1m: list[float]) -> list[float]:
+    if len(closes_1m) < 5:
+        return closes_1m[:]
+    out: list[float] = []
+    for i in range(4, len(closes_1m), 5):
         out.append(closes_1m[i])
     return out
 

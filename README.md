@@ -68,6 +68,8 @@ Some payload fields differ by endpoint version. The client normalizes common alt
 - The bot now prioritizes `price_to_beat` + live BTC/ETH spot to decide `YES` (up) vs `NO` (down).
 - It can run multiple 15m markets in parallel from `MARKET_SEED_TICKERS` (e.g., BTC + ETH).
 - It only places directional taker entries when confidence and edge clear thresholds.
+- It uses multi-timeframe confirmation (`1m + 5m + 15m`) and can veto choppy regimes.
+- Directional fair value is probability-calibrated before EV/sizing checks.
 - The directional entry can require 15m chart alignment (higher-timeframe regime filter).
 - It can trade only at session start (first part of each new 15-minute market).
 - It blocks trades with weak payout/EV after estimated fees.
@@ -81,10 +83,20 @@ Some payload fields differ by endpoint version. The client normalizes common alt
   - `ENTRY_COOLDOWN_SEC`
   - `TA_REQUIRE_15M_ALIGNMENT`
   - `TA_15M_MIN_STRENGTH`
+  - `TA_REQUIRE_5M_ALIGNMENT`
+  - `TA_5M_MIN_STRENGTH`
+  - `SKIP_CHOPPY_REGIME`
+  - `REGIME_MIN_TREND_STRENGTH_BPS`
+  - `REGIME_CHOP_VOL_1M`
+  - `PROBABILITY_CALIBRATION_SLOPE`
+  - `PROBABILITY_CALIBRATION_INTERCEPT`
+  - `PROBABILITY_SHRINK`
   - `ENTRY_AT_SESSION_START_ONLY`
   - `SESSION_START_ENTRY_WINDOW_SEC`
   - `MIN_WIN_PROFIT_CENTS`
   - `MIN_EXPECTED_VALUE_CENTS`
+  - `ASSUMED_SLIPPAGE_CENTS`
+  - `EV_SAFETY_CENTS`
   - `BASE_TRADE_RISK_PCT`
   - `MAX_TRADE_RISK_PCT`
   - `KELLY_FRACTION`

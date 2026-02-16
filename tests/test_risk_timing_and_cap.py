@@ -166,3 +166,37 @@ def test_higher_expected_value_allows_larger_size() -> None:
     assert low.approved is True
     assert high.approved is True
     assert high.max_order_contracts > low.max_order_contracts
+
+
+def test_slippage_buffer_blocks_marginal_ev_trade() -> None:
+    snap = MarketSnapshot(
+        ticker="KXBTC15M-TEST",
+        status="open",
+        yes_bid=59,
+        yes_ask=60,
+        no_bid=40,
+        no_ask=41,
+        bid_size=200,
+        ask_size=200,
+        ts=datetime.now(timezone.utc),
+        close_time=datetime.now(timezone.utc) + timedelta(minutes=5),
+    )
+    signal = SignalDecision("taker", "yes", 0.7, 67.0)
+    health = HealthState(ws_healthy=True, rest_latency_ms=10, consecutive_api_errors=0)
+    base_cfg = dict(
+        entry_at_session_start_only=False,
+        min_top_book_depth=0,
+        assumed_fee_per_contract_cents=1,
+        min_expected_value_cents=0.5,
+        ev_safety_cents=0.0,
+    )
+
+    no_slip = RiskEngine(BotConfig(**base_cfg, assumed_slippage_cents=0))
+    with_slip = RiskEngine(BotConfig(**base_cfg, assumed_slippage_cents=2))
+
+    d0 = no_slip.evaluate(snap, signal, health, _state())
+    d1 = with_slip.evaluate(snap, signal, health, _state())
+
+    assert d0.approved is True
+    assert d1.approved is False
+    assert "negative_expected_value" in d1.reasons

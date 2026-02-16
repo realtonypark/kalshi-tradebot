@@ -54,14 +54,24 @@ class BotConfig:
     entry_cooldown_sec: int = 20
     use_technical_analysis: bool = True
     ta_refresh_sec: int = 5
+    ta_require_5m_alignment: bool = True
+    ta_5m_min_strength: float = 0.45
     ta_require_15m_alignment: bool = True
     ta_15m_min_strength: float = 0.6
+    skip_choppy_regime: bool = True
+    regime_min_trend_strength_bps: float = 4.0
+    regime_chop_vol_1m: float = 0.001
+    probability_calibration_slope: float = 0.85
+    probability_calibration_intercept: float = 0.0
+    probability_shrink: float = 0.18
     directional_score_threshold: float = 0.55
     min_signal_confirmations: int = 3
     signal_confirmation_window: int = 6
     assumed_fee_per_contract_cents: int = 1
+    assumed_slippage_cents: int = 1
     min_win_profit_cents: int = 2
     min_expected_value_cents: float = 0.25
+    ev_safety_cents: float = 0.15
     base_trade_risk_pct: float = 0.0015
     max_trade_risk_pct: float = 0.01
     kelly_fraction: float = 0.20
@@ -171,18 +181,36 @@ def load_config(env_file: str = ".env.local", yaml_file: str | None = None) -> B
             env("USE_TECHNICAL_ANALYSIS", defaults.use_technical_analysis), defaults.use_technical_analysis
         ),
         ta_refresh_sec=int(env("TA_REFRESH_SEC", defaults.ta_refresh_sec)),
+        ta_require_5m_alignment=_as_bool(
+            env("TA_REQUIRE_5M_ALIGNMENT", defaults.ta_require_5m_alignment), defaults.ta_require_5m_alignment
+        ),
+        ta_5m_min_strength=float(env("TA_5M_MIN_STRENGTH", defaults.ta_5m_min_strength)),
         ta_require_15m_alignment=_as_bool(
             env("TA_REQUIRE_15M_ALIGNMENT", defaults.ta_require_15m_alignment), defaults.ta_require_15m_alignment
         ),
         ta_15m_min_strength=float(env("TA_15M_MIN_STRENGTH", defaults.ta_15m_min_strength)),
+        skip_choppy_regime=_as_bool(env("SKIP_CHOPPY_REGIME", defaults.skip_choppy_regime), defaults.skip_choppy_regime),
+        regime_min_trend_strength_bps=float(
+            env("REGIME_MIN_TREND_STRENGTH_BPS", defaults.regime_min_trend_strength_bps)
+        ),
+        regime_chop_vol_1m=float(env("REGIME_CHOP_VOL_1M", defaults.regime_chop_vol_1m)),
+        probability_calibration_slope=float(
+            env("PROBABILITY_CALIBRATION_SLOPE", defaults.probability_calibration_slope)
+        ),
+        probability_calibration_intercept=float(
+            env("PROBABILITY_CALIBRATION_INTERCEPT", defaults.probability_calibration_intercept)
+        ),
+        probability_shrink=float(env("PROBABILITY_SHRINK", defaults.probability_shrink)),
         directional_score_threshold=float(env("DIRECTIONAL_SCORE_THRESHOLD", defaults.directional_score_threshold)),
         min_signal_confirmations=int(env("MIN_SIGNAL_CONFIRMATIONS", defaults.min_signal_confirmations)),
         signal_confirmation_window=int(env("SIGNAL_CONFIRMATION_WINDOW", defaults.signal_confirmation_window)),
         assumed_fee_per_contract_cents=int(
             env("ASSUMED_FEE_PER_CONTRACT_CENTS", defaults.assumed_fee_per_contract_cents)
         ),
+        assumed_slippage_cents=int(env("ASSUMED_SLIPPAGE_CENTS", defaults.assumed_slippage_cents)),
         min_win_profit_cents=int(env("MIN_WIN_PROFIT_CENTS", defaults.min_win_profit_cents)),
         min_expected_value_cents=float(env("MIN_EXPECTED_VALUE_CENTS", defaults.min_expected_value_cents)),
+        ev_safety_cents=float(env("EV_SAFETY_CENTS", defaults.ev_safety_cents)),
         base_trade_risk_pct=float(env("BASE_TRADE_RISK_PCT", defaults.base_trade_risk_pct)),
         max_trade_risk_pct=float(env("MAX_TRADE_RISK_PCT", defaults.max_trade_risk_pct)),
         kelly_fraction=float(env("KELLY_FRACTION", defaults.kelly_fraction)),

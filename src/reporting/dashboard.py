@@ -54,17 +54,19 @@ class Dashboard:
             )
             if snap is not None and signal.side in {"yes", "no"}:
                 entry_price = snap.yes_ask if signal.side == "yes" else snap.no_ask
-                total_cost = entry_price + self.cfg.assumed_fee_per_contract_cents
+                spread = max(0, snap.yes_ask - snap.yes_bid)
+                slippage = self.cfg.assumed_slippage_cents + max(0, (spread - 1) // 2)
+                total_cost = entry_price + self.cfg.assumed_fee_per_contract_cents + slippage
                 max_win = 100 - total_cost
                 breakeven = total_cost / 100.0
                 fair_yes = max(1.0, min(99.0, signal.fair_yes_price))
                 p_raw = fair_yes / 100.0 if signal.side == "yes" else (100.0 - fair_yes) / 100.0
                 conf = max(0.0, min(1.0, signal.confidence))
-                p_adj = 0.5 + ((p_raw - 0.5) * conf)
+                p_adj = 0.5 + ((p_raw - 0.5) * max(0.55, conf))
                 ev = (p_adj * 100.0) - total_cost
                 kelly = _kelly_fraction(p_adj, total_cost, max_win)
                 parts.append(
-                    f"Economics est_cost={total_cost}c max_win={max_win}c breakeven={breakeven:.1%} model_p={p_adj:.1%} model_ev={ev:+.2f}c"
+                    f"Economics est_cost={total_cost}c(fee={self.cfg.assumed_fee_per_contract_cents}c,slip={slippage}c) max_win={max_win}c breakeven={breakeven:.1%} model_p={p_adj:.1%} model_ev={ev:+.2f}c"
                 )
                 parts.append(f"Sizing kelly_raw={kelly:.2%} kelly_used={(kelly * self.cfg.kelly_fraction):.2%}")
             if signal.reason_codes:

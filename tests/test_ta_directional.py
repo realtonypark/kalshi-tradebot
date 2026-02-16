@@ -113,3 +113,43 @@ def test_conflicting_15m_regime_blocks_entry() -> None:
     decision = strat.evaluate(_snap(), spot_price=98105.0, ta_features=ta)
     assert decision.mode == "hold"
     assert "15m_direction_conflict" in decision.reason_codes
+
+
+def test_choppy_regime_blocks_entry() -> None:
+    cfg = BotConfig(
+        taker_confidence_threshold=0.2,
+        taker_min_edge_cents=1,
+        fee_buffer_cents=0,
+        directional_score_threshold=0.15,
+        min_signal_confirmations=1,
+        ta_require_5m_alignment=False,
+        ta_require_15m_alignment=False,
+        skip_choppy_regime=True,
+        regime_min_trend_strength_bps=6.0,
+        regime_chop_vol_1m=0.001,
+    )
+    strat = HybridStrategy(cfg)
+    ta = TAFeatures(
+        spot=98090.0,
+        ema_fast=98085.0,
+        ema_slow=98060.0,
+        macd_hist=4.0,
+        rsi=58.0,
+        momentum_5m=18.0,
+        volatility_1m=0.0016,
+        ema_fast_5m=98020.0,
+        ema_slow_5m=98019.8,
+        macd_hist_5m=0.2,
+        rsi_5m=51.0,
+        momentum_5m_tf=1.0,
+        ema_fast_15m=98050.0,
+        ema_slow_15m=98010.0,
+        macd_hist_15m=2.0,
+        rsi_15m=55.0,
+        momentum_15m=15.0,
+        ts=datetime.now(timezone.utc),
+    )
+
+    decision = strat.evaluate(_snap(), spot_price=98090.0, ta_features=ta)
+    assert decision.mode == "hold"
+    assert "choppy_regime" in decision.reason_codes

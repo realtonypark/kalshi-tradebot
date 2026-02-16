@@ -20,6 +20,7 @@ class PortfolioRiskState:
 @dataclass(slots=True)
 class EconomicsSnapshot:
     entry_price_cents: int
+    slippage_cents: int
     total_cost_cents: int
     max_profit_cents: int
     fair_prob: float
@@ -111,18 +112,22 @@ class RiskEngine:
 
     def _compute_economics(self, snap: MarketSnapshot, signal: SignalDecision) -> EconomicsSnapshot:
         entry_price_cents = snap.yes_ask if signal.side == "yes" else snap.no_ask
-        total_cost_cents = entry_price_cents + self.cfg.assumed_fee_per_contract_cents
+        spread = max(0, snap.yes_ask - snap.yes_bid)
+        slippage_cents = self.cfg.assumed_slippage_cents + max(0, (spread - 1) // 2)
+        total_cost_cents = entry_price_cents + self.cfg.assumed_fee_per_contract_cents + slippage_cents
         max_profit_cents = max(0, 100 - total_cost_cents)
 
         fair_yes = _clamp(signal.fair_yes_price, 1.0, 99.0)
         fair_prob = fair_yes / 100.0 if signal.side == "yes" else (100.0 - fair_yes) / 100.0
         confidence = _clamp(signal.confidence, 0.0, 1.0)
-        adjusted_prob = 0.5 + ((fair_prob - 0.5) * confidence)
+        confidence_weight = max(0.55, confidence)
+        adjusted_prob = 0.5 + ((fair_prob - 0.5) * confidence_weight)
         expected_value_cents = (adjusted_prob * 100.0) - total_cost_cents
 
         kelly_fraction = _kelly_fraction(adjusted_prob, total_cost_cents, max_profit_cents)
         return EconomicsSnapshot(
             entry_price_cents=entry_price_cents,
+            slippage_cents=slippage_cents,
             total_cost_cents=total_cost_cents,
             max_profit_cents=max_profit_cents,
             fair_prob=fair_prob,
@@ -134,7 +139,8 @@ class RiskEngine:
     def _economics_check(self, economics: EconomicsSnapshot) -> str | None:
         if economics.max_profit_cents < self.cfg.min_win_profit_cents:
             return "poor_payout_ratio"
-        if economics.expected_value_cents < self.cfg.min_expected_value_cents:
+        min_ev = self.cfg.min_expected_value_cents + max(0.0, self.cfg.ev_safety_cents)
+        if economics.expected_value_cents < min_ev:
             return "negative_expected_value"
         if economics.kelly_fraction <= 0:
             return "negative_expected_value"
