@@ -22,6 +22,7 @@ class BotConfig:
     private_key_path: str = ""
     private_key_pem: str = ""
     market_seed_ticker: str = "kxbtc15m-26feb151715"
+    market_seed_tickers: str = ""
     auto_roll: bool = True
     paper_mode: bool = False
     bankroll_usd: float = 3000.0
@@ -80,6 +81,10 @@ class BotConfig:
     def market_exposure_limit_usd(self) -> float:
         return self.bankroll_usd * min(self.max_market_exposure_pct, self.max_bet_pct)
 
+    @property
+    def seed_tickers(self) -> list[str]:
+        return _parse_seed_tickers(self.market_seed_tickers, self.market_seed_ticker)
+
 
 def _as_bool(value: str | bool, default: bool) -> bool:
     if isinstance(value, bool):
@@ -125,6 +130,7 @@ def load_config(env_file: str = ".env.local", yaml_file: str | None = None) -> B
         private_key_path=str(env("KALSHI_PRIVATE_KEY_PATH", "")),
         private_key_pem=str(env("KALSHI_PRIVATE_KEY_PEM", env("KALSHI_PRIVATE_KEY", defaults.private_key_pem))),
         market_seed_ticker=str(env("MARKET_SEED_TICKER", defaults.market_seed_ticker)).upper(),
+        market_seed_tickers=str(env("MARKET_SEED_TICKERS", defaults.market_seed_tickers)),
         auto_roll=_as_bool(env("AUTO_ROLL", defaults.auto_roll), defaults.auto_roll),
         paper_mode=_as_bool(env("PAPER_MODE", defaults.paper_mode), defaults.paper_mode),
         bankroll_usd=float(env("BANKROLL_USD", defaults.bankroll_usd)),
@@ -214,3 +220,19 @@ def _load_env_file_fallback(path: str) -> None:
         ):
             value = value[1:-1]
         os.environ.setdefault(key, value)
+
+
+def _parse_seed_tickers(raw_csv: str, fallback: str) -> list[str]:
+    seed_raw = raw_csv.strip()
+    tokens = [fallback]
+    if seed_raw:
+        tokens = [part.strip() for part in seed_raw.split(",") if part.strip()]
+    out: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        ticker = token.upper()
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        out.append(ticker)
+    return out

@@ -47,3 +47,29 @@ async def test_locator_prefers_live_quote_market() -> None:
     loc = MarketLocator(cfg)
     ticker = await loc.pick_active_ticker(_Client())
     assert ticker == "MKT-TIGHT"
+
+
+class _SeriesClient:
+    def __init__(self) -> None:
+        self.last_series: str | None = None
+
+    async def get_market(self, ticker: str):
+        import httpx
+
+        req = httpx.Request("GET", f"https://x/markets/{ticker}")
+        res = httpx.Response(404, request=req)
+        raise httpx.HTTPStatusError("not found", request=req, response=res)
+
+    async def list_markets(self, **params):
+        series = params.get("series_ticker")
+        if isinstance(series, str):
+            self.last_series = series
+        return []
+
+
+async def test_locator_uses_series_from_seed_prefix() -> None:
+    client = _SeriesClient()
+    cfg = BotConfig(market_seed_ticker="KXBTC15M-OLD", auto_roll=True)
+    loc = MarketLocator(cfg, seed_ticker="KXETH15M-OLD")
+    _ = await loc.pick_active_ticker(client)
+    assert client.last_series == "KXETH15M"

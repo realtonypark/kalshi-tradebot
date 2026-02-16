@@ -113,7 +113,7 @@ class KalshiWsFeed:
         if not self._tickers:
             return
         msg = {
-            "id": "btc15m-feed",
+            "id": "k15m-feed",
             "cmd": "subscribe",
             "params": {
                 # Keep to public channels to avoid WS auth requirements.

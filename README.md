@@ -1,6 +1,6 @@
-# Kalshi BTC 15m Hybrid Bot
+# Kalshi BTC/ETH 15m Hybrid Bot
 
-Live-first trading bot for Kalshi BTC 15-minute up/down markets with strict risk controls, auto-roll, flat-file persistence, and a 5-second terminal dashboard.
+Live-first trading bot for Kalshi BTC/ETH 15-minute up/down markets with strict risk controls, auto-roll, flat-file persistence, and a 5-second terminal dashboard.
 
 ## Safety Notes
 
@@ -15,6 +15,7 @@ Live-first trading bot for Kalshi BTC 15-minute up/down markets with strict risk
 2. Set real credentials in `.env.local`:
    - `KALSHI_API_KEY_ID`
    - `KALSHI_PRIVATE_KEY_PATH` or `KALSHI_PRIVATE_KEY_PEM`
+   - `MARKET_SEED_TICKERS` for multi-market trading (example: BTC + ETH)
 3. Install dependencies:
    - `python3 -m pip install -e ".[dev]"`
 
@@ -23,24 +24,6 @@ Live-first trading bot for Kalshi BTC 15-minute up/down markets with strict risk
 - `./run_bot.sh`
 - or `python3 -m src.main --env-file .env.local`
 - flatten positions and exit: `python3 -m src.main --env-file .env.local --flatten-now`
-
-## Operational Controls
-
-- Manual halt file:
-  - `touch /Users/realtonypark/Developer/printer/.halt_trading`
-- Resume:
-  - `rm /Users/realtonypark/Developer/printer/.halt_trading`
-  - restart bot
-- Graceful stop:
-  - `Ctrl+C`
-
-## Data Outputs
-
-- `/Users/realtonypark/Developer/printer/data/fills.jsonl`
-- `/Users/realtonypark/Developer/printer/data/orders.jsonl`
-- `/Users/realtonypark/Developer/printer/data/positions.json`
-- `/Users/realtonypark/Developer/printer/data/pnl_timeseries.csv`
-- `/Users/realtonypark/Developer/printer/data/health.json`
 
 ## launchd Example
 
@@ -80,9 +63,10 @@ Load it:
 
 Some payload fields differ by endpoint version. The client normalizes common alternatives for market quotes, positions, and order fields, and fails closed when risk checks are not satisfied.
 
-## BTC 15m Directional Signal
+## 15m Directional Signal
 
-- The bot now prioritizes `price_to_beat` + live BTC spot to decide `YES` (up) vs `NO` (down).
+- The bot now prioritizes `price_to_beat` + live BTC/ETH spot to decide `YES` (up) vs `NO` (down).
+- It can run multiple 15m markets in parallel from `MARKET_SEED_TICKERS` (e.g., BTC + ETH).
 - It only places directional taker entries when confidence and edge clear thresholds.
 - The directional entry can require 15m chart alignment (higher-timeframe regime filter).
 - It can trade only at session start (first part of each new 15-minute market).

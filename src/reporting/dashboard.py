@@ -30,7 +30,7 @@ class Dashboard:
 
         parts: list[str] = []
         parts.append("=" * 86)
-        parts.append(f"Kalshi BTC15m Bot | {now} | market={ticker}")
+        parts.append(f"Kalshi 15m Bot | {now} | market={ticker}")
         parts.append(
             f"PnL realized={portfolio.realized_pnl_usd:+.2f} unrealized={portfolio.unrealized_pnl_usd:+.2f} net={net:+.2f}"
         )

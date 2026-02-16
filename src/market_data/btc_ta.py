@@ -30,7 +30,8 @@ class TAFeatures:
 
 
 class BtcTechnicalFeed:
-    def __init__(self, refresh_sec: int = 5) -> None:
+    def __init__(self, symbol: str = "BTC", refresh_sec: int = 5) -> None:
+        self.symbol = symbol.upper()
         self.refresh_sec = max(1, refresh_sec)
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(2.8, connect=1.5))
         self._cached: TAFeatures | None = None
@@ -59,9 +60,10 @@ class BtcTechnicalFeed:
         return self._cached
 
     async def _from_binance(self) -> tuple[list[float], list[float]]:
+        pair = f"{self.symbol}USDT"
         res_1m = await self._client.get(
             "https://api.binance.com/api/v3/klines",
-            params={"symbol": "BTCUSDT", "interval": "1m", "limit": 180},
+            params={"symbol": pair, "interval": "1m", "limit": 180},
         )
         res_1m.raise_for_status()
         rows_1m = res_1m.json()
@@ -69,7 +71,7 @@ class BtcTechnicalFeed:
 
         res_15m = await self._client.get(
             "https://api.binance.com/api/v3/klines",
-            params={"symbol": "BTCUSDT", "interval": "15m", "limit": 120},
+            params={"symbol": pair, "interval": "15m", "limit": 120},
         )
         res_15m.raise_for_status()
         rows_15m = res_15m.json()
@@ -77,8 +79,9 @@ class BtcTechnicalFeed:
         return closes_1m, closes_15m
 
     async def _from_coinbase(self) -> tuple[list[float], list[float]]:
+        product = f"{self.symbol}-USD"
         res_1m = await self._client.get(
-            "https://api.exchange.coinbase.com/products/BTC-USD/candles",
+            f"https://api.exchange.coinbase.com/products/{product}/candles",
             params={"granularity": 60, "limit": 180},
         )
         res_1m.raise_for_status()
@@ -89,7 +92,7 @@ class BtcTechnicalFeed:
         closes_1m = [float(r[4]) for r in rows_1m]
 
         res_15m = await self._client.get(
-            "https://api.exchange.coinbase.com/products/BTC-USD/candles",
+            f"https://api.exchange.coinbase.com/products/{product}/candles",
             params={"granularity": 900, "limit": 120},
         )
         res_15m.raise_for_status()

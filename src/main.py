@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -28,6 +28,18 @@ from src.strategy.hybrid import HybridStrategy
 LOGGER = logging.getLogger(__name__)
 
 
+@dataclass(slots=True)
+class InstrumentRuntime:
+    seed_ticker: str
+    asset: str
+    locator: MarketLocator
+    strategy: HybridStrategy
+    spot_feed: BtcSpotFeed
+    ta_feed: BtcTechnicalFeed
+    last_snapshot: MarketSnapshot | None = None
+    last_skip_log: datetime = field(default_factory=lambda: datetime.min.replace(tzinfo=timezone.utc))
+
+
 async def run_bot(cfg: BotConfig) -> None:
     setup_logging(cfg.log_dir)
     _validate_config(cfg)
@@ -38,35 +50,33 @@ async def run_bot(cfg: BotConfig) -> None:
 
     health = HealthState(ws_healthy=False)
     client = KalshiClient(cfg, health)
-    strategy = HybridStrategy(cfg)
     risk_engine = RiskEngine(cfg)
     portfolio = PortfolioState()
-    locator = MarketLocator(cfg)
-    spot_feed = BtcSpotFeed()
-    ta_feed = BtcTechnicalFeed(refresh_sec=cfg.ta_refresh_sec)
     dashboard = Dashboard(cfg)
     router = ExecutionRouter(cfg, client)
     seen_fills: set[str] = store.load_seen_fills()
+    runtimes = [_build_instrument_runtime(cfg, seed_ticker) for seed_ticker in cfg.seed_tickers]
 
     startup_balance = await _startup_auth_check(client)
     router.set_available_balance_cents(_extract_available_balance_cents(startup_balance))
 
     ws = KalshiWsFeed(cfg, health)
-    ws.subscribe(cfg.market_seed_ticker)
+    for runtime in runtimes:
+        ws.subscribe(runtime.seed_ticker)
     ws_task = asyncio.create_task(ws.run_forever(), name="kalshi-ws")
-    LOGGER.info("bot started env=%s paper_mode=%s seed=%s", cfg.kalshi_env, cfg.paper_mode, cfg.market_seed_ticker)
+    LOGGER.info(
+        "bot started env=%s paper_mode=%s seeds=%s",
+        cfg.kalshi_env,
+        cfg.paper_mode,
+        ",".join(runtime.seed_ticker for runtime in runtimes),
+    )
 
     last_dashboard = datetime.min.replace(tzinfo=timezone.utc)
     last_positions_sync = datetime.min.replace(tzinfo=timezone.utc)
     last_balance_sync = datetime.min.replace(tzinfo=timezone.utc)
-    last_snapshots: dict[str, MarketSnapshot] = {}
-    last_skip_log = datetime.min.replace(tzinfo=timezone.utc)
 
     try:
         while not kill.triggered:
-            ticker = await locator.pick_active_ticker(client)
-            ws.subscribe(ticker)
-
             now = datetime.now(timezone.utc)
             if (now - last_positions_sync).total_seconds() > 20:
                 await _sync_positions(client, portfolio)
@@ -75,78 +85,91 @@ async def run_bot(cfg: BotConfig) -> None:
                 await _sync_balance(client, router)
                 last_balance_sync = now
 
-            snap = await _snapshot_from_ws_or_rest(client, ws, ticker, last_snapshots.get(ticker))
-            last_snapshots[ticker] = snap
-            health.last_market_data_ts = snap.ts
+            dashboard_rows: list[tuple[str, str, MarketSnapshot, Any]] = []
+            for runtime in runtimes:
+                ticker = await runtime.locator.pick_active_ticker(client)
+                ws.subscribe(ticker)
 
-            ta_features = await ta_feed.get_features()
-            spot_price = ta_features.spot if ta_features is not None else await spot_feed.get_price()
-            signal = strategy.evaluate(snap, spot_price=spot_price, ta_features=ta_features)
-            portfolio.mark(snap)
+                snap = await _snapshot_from_ws_or_rest(client, ws, ticker, runtime.last_snapshot)
+                runtime.last_snapshot = snap
+                health.last_market_data_ts = max(health.last_market_data_ts, snap.ts)
 
-            risk_state = PortfolioRiskState(
-                gross_exposure_usd=portfolio.gross_exposure_usd(),
-                market_exposure_usd=portfolio.market_exposure_usd(ticker),
-                realized_pnl_usd=portfolio.realized_pnl_usd,
-                unrealized_pnl_usd=portfolio.unrealized_pnl_usd,
-                open_orders=len(router.open_orders),
-                trading_started_at=portfolio.trading_started_at,
-            )
-            risk = risk_engine.evaluate(snap, signal, health, risk_state)
-            if risk.halt:
-                LOGGER.critical("risk halt triggered reasons=%s", ",".join(risk.reasons))
-                kill.trip()
-                break
-            if not risk.approved and (now - last_skip_log).total_seconds() >= 5:
-                LOGGER.info(
-                    "no-trade ticker=%s risk=%s signal=%s/%s signal_reasons=%s spread=%s depth=%s/%s beat=%s spot=%s rsi1=%s macd1=%s rsi15=%s macd15=%s",
-                    ticker,
-                    ",".join(risk.reasons) if risk.reasons else "unknown",
-                    signal.mode,
-                    signal.side,
-                    ",".join(signal.reason_codes) if signal.reason_codes else "none",
-                    max(0, snap.yes_ask - snap.yes_bid),
-                    snap.bid_size,
-                    snap.ask_size,
-                    f"{snap.price_to_beat:.2f}" if snap.price_to_beat is not None else "na",
-                    f"{spot_price:.2f}" if spot_price is not None else "na",
-                    f"{ta_features.rsi:.1f}" if ta_features is not None else "na",
-                    f"{ta_features.macd_hist:.4f}" if ta_features is not None else "na",
-                    f"{ta_features.rsi_15m:.1f}" if ta_features is not None else "na",
-                    f"{ta_features.macd_hist_15m:.4f}" if ta_features is not None else "na",
+                ta_features = await runtime.ta_feed.get_features()
+                spot_price = ta_features.spot if ta_features is not None else await runtime.spot_feed.get_price()
+                signal = runtime.strategy.evaluate(snap, spot_price=spot_price, ta_features=ta_features)
+                portfolio.mark(snap)
+
+                risk_state = PortfolioRiskState(
+                    gross_exposure_usd=portfolio.gross_exposure_usd(),
+                    market_exposure_usd=portfolio.market_exposure_usd(ticker),
+                    realized_pnl_usd=portfolio.realized_pnl_usd,
+                    unrealized_pnl_usd=portfolio.unrealized_pnl_usd,
+                    open_orders=len(router.open_orders),
+                    trading_started_at=portfolio.trading_started_at,
                 )
-                last_skip_log = now
+                risk = risk_engine.evaluate(snap, signal, health, risk_state)
+                if risk.halt:
+                    LOGGER.critical("risk halt triggered reasons=%s", ",".join(risk.reasons))
+                    kill.trip()
+                    break
 
-            intents = router.build_intents(snap, signal, risk, portfolio.net_side(ticker))
-            result = await router.execute(intents)
-            await router.cancel_stale(max_age_sec=12)
+                if not risk.approved and (now - runtime.last_skip_log).total_seconds() >= 5:
+                    LOGGER.info(
+                        "no-trade asset=%s ticker=%s risk=%s signal=%s/%s signal_reasons=%s spread=%s depth=%s/%s beat=%s spot=%s rsi1=%s macd1=%s rsi15=%s macd15=%s",
+                        runtime.asset,
+                        ticker,
+                        ",".join(risk.reasons) if risk.reasons else "unknown",
+                        signal.mode,
+                        signal.side,
+                        ",".join(signal.reason_codes) if signal.reason_codes else "none",
+                        max(0, snap.yes_ask - snap.yes_bid),
+                        snap.bid_size,
+                        snap.ask_size,
+                        f"{snap.price_to_beat:.2f}" if snap.price_to_beat is not None else "na",
+                        f"{spot_price:.2f}" if spot_price is not None else "na",
+                        f"{ta_features.rsi:.1f}" if ta_features is not None else "na",
+                        f"{ta_features.macd_hist:.4f}" if ta_features is not None else "na",
+                        f"{ta_features.rsi_15m:.1f}" if ta_features is not None else "na",
+                        f"{ta_features.macd_hist_15m:.4f}" if ta_features is not None else "na",
+                    )
+                    runtime.last_skip_log = now
 
-            for intent, response in zip(result.sent_intents, result.responses):
-                store.append_order(
-                    {
-                        "ticker": intent.ticker,
-                        "client_order_id": intent.client_order_id,
-                        "side": intent.side,
-                        "action": intent.action,
-                        "price_cents": intent.price_cents,
-                        "contracts": intent.contracts,
-                        "post_only": intent.post_only,
-                        "response": response,
-                    }
-                )
+                intents = router.build_intents(snap, signal, risk, portfolio.net_side(ticker))
+                result = await router.execute(intents)
+                await router.cancel_stale(max_age_sec=12)
 
-            await _reconcile_fills(client, ticker, seen_fills, portfolio, store)
+                for intent, response in zip(result.sent_intents, result.responses):
+                    store.append_order(
+                        {
+                            "asset": runtime.asset,
+                            "ticker": intent.ticker,
+                            "client_order_id": intent.client_order_id,
+                            "side": intent.side,
+                            "action": intent.action,
+                            "price_cents": intent.price_cents,
+                            "contracts": intent.contracts,
+                            "post_only": intent.post_only,
+                            "response": response,
+                        }
+                    )
+
+                await _reconcile_fills(client, ticker, seen_fills, portfolio, store)
+                dashboard_rows.append((runtime.asset, ticker, snap, signal))
+
             store.write_positions(portfolio.snapshot())
 
             if (now - last_dashboard).total_seconds() >= cfg.dashboard_interval_sec:
-                print(dashboard.render(ticker, snap, signal, portfolio, health, router), flush=True)
+                for asset, ticker, snap, signal in dashboard_rows:
+                    print(dashboard.render(f"{asset}:{ticker}", snap, signal, portfolio, health, router), flush=True)
                 store.append_pnl(
                     portfolio.realized_pnl_usd,
                     portfolio.unrealized_pnl_usd,
                     portfolio.realized_pnl_usd + portfolio.unrealized_pnl_usd,
                     portfolio.gross_exposure_usd(),
                 )
-                store.write_health(dashboard.health_payload(ticker, snap, signal, portfolio, health, router))
+                if dashboard_rows:
+                    _, ticker, snap, signal = dashboard_rows[0]
+                    store.write_health(dashboard.health_payload(ticker, snap, signal, portfolio, health, router))
                 last_dashboard = now
 
             await asyncio.sleep(1.0)
@@ -158,8 +181,9 @@ async def run_bot(cfg: BotConfig) -> None:
             LOGGER.warning("cancel all failed: %s", exc)
         await ws.stop()
         ws_task.cancel()
-        await ta_feed.aclose()
-        await spot_feed.aclose()
+        for runtime in runtimes:
+            await runtime.ta_feed.aclose()
+            await runtime.spot_feed.aclose()
         await client.aclose()
 
 
@@ -170,6 +194,25 @@ def _validate_config(cfg: BotConfig) -> None:
         raise ValueError("Missing KALSHI_API_KEY_ID")
     if not cfg.private_key_path and not cfg.private_key_pem:
         raise ValueError("Missing private key: set KALSHI_PRIVATE_KEY_PATH or KALSHI_PRIVATE_KEY_PEM")
+
+
+def _build_instrument_runtime(cfg: BotConfig, seed_ticker: str) -> InstrumentRuntime:
+    asset = _asset_from_seed(seed_ticker)
+    return InstrumentRuntime(
+        seed_ticker=seed_ticker,
+        asset=asset,
+        locator=MarketLocator(cfg, seed_ticker=seed_ticker),
+        strategy=HybridStrategy(cfg),
+        spot_feed=BtcSpotFeed(symbol=asset),
+        ta_feed=BtcTechnicalFeed(symbol=asset, refresh_sec=cfg.ta_refresh_sec),
+    )
+
+
+def _asset_from_seed(seed_ticker: str) -> str:
+    seed = seed_ticker.upper()
+    if "ETH" in seed:
+        return "ETH"
+    return "BTC"
 
 
 async def _sync_positions(client: KalshiClient, portfolio: PortfolioState) -> None:
@@ -248,13 +291,7 @@ async def _snapshot_from_ws_or_rest(
     ticker: str,
     prior: MarketSnapshot | None,
 ) -> MarketSnapshot:
-    for _ in range(30):
-        msg = await ws.get_message(timeout=0.0)
-        if msg is None:
-            break
-        ws_snap = _extract_ws_snapshot(msg, ticker, prior)
-        if ws_snap is not None:
-            return ws_snap
+    _ = ws, prior
     market = await client.get_market(ticker)
     return KalshiClient.parse_market_snapshot(market, ticker=ticker)
 
@@ -396,7 +433,7 @@ def _extract_fill_fee_cents(order: dict[str, Any]) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Kalshi BTC 15m hybrid bot")
+    parser = argparse.ArgumentParser(description="Kalshi 15m hybrid bot (multi-market)")
     parser.add_argument("--env-file", default=".env.local", help="Path to .env file")
     parser.add_argument("--config-yaml", default=None, help="Optional yaml config override")
     parser.add_argument("--flatten-now", action="store_true", help="Flatten current positions and exit")

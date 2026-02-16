@@ -12,11 +12,12 @@ LOGGER = logging.getLogger(__name__)
 
 
 class MarketLocator:
-    def __init__(self, cfg: BotConfig) -> None:
+    def __init__(self, cfg: BotConfig, seed_ticker: str | None = None, series_ticker: str | None = None) -> None:
         self.cfg = cfg
-        self.seed_ticker = cfg.market_seed_ticker
+        self.seed_ticker = (seed_ticker or cfg.market_seed_ticker).upper()
+        self.series_ticker = (series_ticker or _series_from_ticker(self.seed_ticker)).upper()
         self.auto_roll = cfg.auto_roll
-        self.current_ticker = cfg.market_seed_ticker
+        self.current_ticker = self.seed_ticker
         self._last_discovery_at = datetime.min.replace(tzinfo=timezone.utc)
         self._discovery_interval_sec = 10
 
@@ -65,7 +66,7 @@ class MarketLocator:
             candidates.extend(rows)
 
         if not candidates:
-            candidates = await client.list_markets(series_ticker="KXBTC15M", status="open", limit=50)
+            candidates = await client.list_markets(series_ticker=self.series_ticker, status="open", limit=50)
 
         unique: dict[str, dict] = {}
         for market in candidates:
@@ -130,3 +131,10 @@ def _as_int(value: object, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _series_from_ticker(ticker: str) -> str:
+    token = ticker.strip().upper()
+    if not token:
+        return "KXBTC15M"
+    return token.split("-", 1)[0]
