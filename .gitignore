@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+.env.local
+.halt_trading
+*.txt
+
+/data/*.jsonl
+/data/*.json
+/data/*.csv
+/logs/*.log
+/logs/*.json
