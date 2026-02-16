@@ -21,16 +21,25 @@ class TAFeatures:
     rsi: float
     momentum_5m: float
     volatility_1m: float
+    macd_hist_bps: float = 0.0
+    macd_hist_prev: float = 0.0
+    rsi_prev: float = 50.0
     ema_fast_5m: float = 0.0
     ema_slow_5m: float = 0.0
     macd_hist_5m: float = 0.0
+    macd_hist_5m_bps: float = 0.0
+    macd_hist_prev_5m: float = 0.0
     rsi_5m: float = 50.0
+    rsi_prev_5m: float = 50.0
     momentum_5m_tf: float = 0.0
     volatility_5m: float = 0.0
     ema_fast_15m: float = 0.0
     ema_slow_15m: float = 0.0
     macd_hist_15m: float = 0.0
+    macd_hist_15m_bps: float = 0.0
+    macd_hist_prev_15m: float = 0.0
     rsi_15m: float = 50.0
+    rsi_prev_15m: float = 50.0
     momentum_15m: float = 0.0
     ts: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -139,15 +148,11 @@ def _compute_features(
     ema_fast = _ema(closes_1m, 12)
     ema_slow = _ema(closes_1m, 26)
 
-    macd_series = []
-    for i in range(26, len(closes_1m) + 1):
-        window = closes_1m[:i]
-        macd_series.append(_ema(window, 12) - _ema(window, 26))
-    signal = _ema(macd_series, 9) if macd_series else 0.0
-    macd_hist = (macd_series[-1] - signal) if macd_series else 0.0
+    macd_hist, macd_hist_prev = _macd_hist_pair(closes_1m, 12, 26, 9)
 
     rsi = _rsi(closes_1m, 14)
-    momentum_5m = closes_1m[-1] - closes_1m[-6] if len(closes_1m) >= 6 else 0.0
+    rsi_prev = _rsi(closes_1m[:-1], 14) if len(closes_1m) >= 16 else rsi
+    momentum_5m = _bps_change(closes_1m[-6], closes_1m[-1]) if len(closes_1m) >= 6 else 0.0
 
     returns = []
     for i in range(1, min(len(closes_1m), 31)):
@@ -161,9 +166,10 @@ def _compute_features(
         closes_5m = _downsample_to_5m(closes_1m)
     ema_fast_5m = _ema(closes_5m, 8) if closes_5m else spot
     ema_slow_5m = _ema(closes_5m, 21) if closes_5m else spot
-    macd_hist_5m = _macd_hist(closes_5m, 8, 21, 9) if closes_5m else 0.0
+    macd_hist_5m, macd_hist_prev_5m = _macd_hist_pair(closes_5m, 8, 21, 9) if closes_5m else (0.0, 0.0)
     rsi_5m = _rsi(closes_5m, 14) if closes_5m else 50.0
-    momentum_5m_tf = closes_5m[-1] - closes_5m[-5] if len(closes_5m) >= 5 else 0.0
+    rsi_prev_5m = _rsi(closes_5m[:-1], 14) if closes_5m and len(closes_5m) >= 16 else rsi_5m
+    momentum_5m_tf = _bps_change(closes_5m[-5], closes_5m[-1]) if len(closes_5m) >= 5 else 0.0
     returns_5m = []
     for i in range(1, min(len(closes_5m), 25)):
         prev = closes_5m[-i - 1]
@@ -176,28 +182,41 @@ def _compute_features(
         closes_15m = _downsample_to_15m(closes_1m)
     ema_fast_15m = _ema(closes_15m, 8) if closes_15m else spot
     ema_slow_15m = _ema(closes_15m, 21) if closes_15m else spot
-    macd_hist_15m = _macd_hist(closes_15m, 8, 21, 9) if closes_15m else 0.0
+    macd_hist_15m, macd_hist_prev_15m = _macd_hist_pair(closes_15m, 8, 21, 9) if closes_15m else (0.0, 0.0)
     rsi_15m = _rsi(closes_15m, 14) if closes_15m else 50.0
-    momentum_15m = closes_15m[-1] - closes_15m[-5] if len(closes_15m) >= 5 else 0.0
+    rsi_prev_15m = _rsi(closes_15m[:-1], 14) if closes_15m and len(closes_15m) >= 16 else rsi_15m
+    momentum_15m = _bps_change(closes_15m[-5], closes_15m[-1]) if len(closes_15m) >= 5 else 0.0
+    macd_hist_bps = _bps_change(0.0, macd_hist, base=spot)
+    macd_hist_5m_bps = _bps_change(0.0, macd_hist_5m, base=closes_5m[-1] if closes_5m else spot)
+    macd_hist_15m_bps = _bps_change(0.0, macd_hist_15m, base=closes_15m[-1] if closes_15m else spot)
 
     return TAFeatures(
         spot=spot,
         ema_fast=ema_fast,
         ema_slow=ema_slow,
         macd_hist=macd_hist,
+        macd_hist_bps=macd_hist_bps,
+        macd_hist_prev=macd_hist_prev,
         rsi=rsi,
+        rsi_prev=rsi_prev,
         momentum_5m=momentum_5m,
         volatility_1m=volatility,
         ema_fast_5m=ema_fast_5m,
         ema_slow_5m=ema_slow_5m,
         macd_hist_5m=macd_hist_5m,
+        macd_hist_5m_bps=macd_hist_5m_bps,
+        macd_hist_prev_5m=macd_hist_prev_5m,
         rsi_5m=rsi_5m,
+        rsi_prev_5m=rsi_prev_5m,
         momentum_5m_tf=momentum_5m_tf,
         volatility_5m=volatility_5m,
         ema_fast_15m=ema_fast_15m,
         ema_slow_15m=ema_slow_15m,
         macd_hist_15m=macd_hist_15m,
+        macd_hist_15m_bps=macd_hist_15m_bps,
+        macd_hist_prev_15m=macd_hist_prev_15m,
         rsi_15m=rsi_15m,
+        rsi_prev_15m=rsi_prev_15m,
         momentum_15m=momentum_15m,
         ts=now,
     )
@@ -212,6 +231,14 @@ def _macd_hist(closes: list[float], fast: int, slow: int, sig: int) -> float:
         macd_series.append(_ema(window, fast) - _ema(window, slow))
     signal = _ema(macd_series, sig) if macd_series else 0.0
     return (macd_series[-1] - signal) if macd_series else 0.0
+
+
+def _macd_hist_pair(closes: list[float], fast: int, slow: int, sig: int) -> tuple[float, float]:
+    curr = _macd_hist(closes, fast, slow, sig)
+    if len(closes) <= (slow + sig):
+        return curr, curr
+    prev = _macd_hist(closes[:-1], fast, slow, sig)
+    return curr, prev
 
 
 def _downsample_to_15m(closes_1m: list[float]) -> list[float]:
@@ -267,3 +294,10 @@ def _stdev(values: list[float]) -> float:
     mean = fmean(values)
     var = sum((v - mean) ** 2 for v in values) / (len(values) - 1)
     return sqrt(var)
+
+
+def _bps_change(old: float, new: float, base: float | None = None) -> float:
+    denom = abs(base) if base is not None else abs(old)
+    if denom <= 0:
+        return 0.0
+    return ((new - old) / denom) * 10000.0

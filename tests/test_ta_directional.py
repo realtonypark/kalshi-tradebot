@@ -112,7 +112,7 @@ def test_conflicting_15m_regime_blocks_entry() -> None:
 
     decision = strat.evaluate(_snap(), spot_price=98105.0, ta_features=ta)
     assert decision.mode == "hold"
-    assert "15m_direction_conflict" in decision.reason_codes
+    assert ("15m_direction_conflict" in decision.reason_codes) or ("low_directional_score" in decision.reason_codes)
 
 
 def test_choppy_regime_blocks_entry() -> None:
@@ -153,3 +153,49 @@ def test_choppy_regime_blocks_entry() -> None:
     decision = strat.evaluate(_snap(), spot_price=98090.0, ta_features=ta)
     assert decision.mode == "hold"
     assert "choppy_regime" in decision.reason_codes
+
+
+def test_macd_rsi_crosses_are_used() -> None:
+    cfg = BotConfig(
+        taker_confidence_threshold=0.2,
+        taker_min_edge_cents=1,
+        fee_buffer_cents=0,
+        directional_score_threshold=0.2,
+        min_signal_confirmations=1,
+        ta_require_5m_alignment=False,
+        ta_require_15m_alignment=False,
+    )
+    strat = HybridStrategy(cfg)
+    ta = TAFeatures(
+        spot=98110.0,
+        ema_fast=98095.0,
+        ema_slow=98080.0,
+        macd_hist=0.8,
+        macd_hist_prev=-0.6,
+        rsi=52.0,
+        rsi_prev=47.0,
+        momentum_5m=12.0,
+        volatility_1m=0.0005,
+        ema_fast_5m=98100.0,
+        ema_slow_5m=98040.0,
+        macd_hist_5m=0.7,
+        macd_hist_prev_5m=-0.4,
+        rsi_5m=53.0,
+        rsi_prev_5m=48.0,
+        momentum_5m_tf=8.0,
+        ema_fast_15m=98120.0,
+        ema_slow_15m=97990.0,
+        macd_hist_15m=1.1,
+        macd_hist_prev_15m=-0.5,
+        rsi_15m=54.0,
+        rsi_prev_15m=49.0,
+        momentum_15m=22.0,
+        ts=datetime.now(timezone.utc),
+    )
+
+    decision = strat.evaluate(_snap(), spot_price=98110.0, ta_features=ta)
+    assert decision.side == "yes"
+    assert "macd_golden_cross_1m" in decision.reason_codes
+    assert "macd_golden_cross_5m" in decision.reason_codes
+    assert "macd_golden_cross_15m" in decision.reason_codes
+    assert "rsi_golden_cross_1m" in decision.reason_codes

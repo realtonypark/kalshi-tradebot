@@ -10,10 +10,20 @@ def test_compute_features_includes_15m_fields() -> None:
 
     feat = _compute_features(closes_1m, closes_15m, closes_5m)
 
+    assert feat.macd_hist_prev != 0 or feat.macd_hist != 0
+    assert feat.macd_hist_bps != 0
+    assert feat.momentum_5m != 0
+    assert 0 <= feat.rsi_prev <= 100
     assert feat.ema_fast_5m > 0
     assert feat.ema_slow_5m > 0
+    assert feat.macd_hist_prev_5m != 0 or feat.macd_hist_5m != 0
+    assert feat.macd_hist_5m_bps != 0
     assert 0 <= feat.rsi_5m <= 100
+    assert 0 <= feat.rsi_prev_5m <= 100
     assert feat.ema_fast_15m > 0
     assert feat.ema_slow_15m > 0
+    assert feat.macd_hist_prev_15m != 0 or feat.macd_hist_15m != 0
+    assert feat.macd_hist_15m_bps != 0
     assert 0 <= feat.rsi_15m <= 100
+    assert 0 <= feat.rsi_prev_15m <= 100
     assert feat.spot == closes_1m[-1]

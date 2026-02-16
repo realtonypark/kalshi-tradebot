@@ -72,3 +72,42 @@ def test_blocks_thin_book() -> None:
 
     assert decision.approved is False
     assert "book_depth_too_thin" in decision.reasons
+
+
+def test_mandatory_override_approves_soft_block() -> None:
+    cfg = BotConfig(mandatory_session_entry=True, mandatory_entry_contracts=1)
+    engine = RiskEngine(cfg)
+    signal = SignalDecision("taker", "yes", 0.6, 60.0, ["mandatory_session_entry"])
+    health = HealthState(ws_healthy=True, rest_latency_ms=50, consecutive_api_errors=0)
+
+    decision = engine.evaluate(
+        _snap(yes_bid=0, yes_ask=100, no_bid=0, no_ask=100),
+        signal,
+        health,
+        _risk_state(),
+    )
+    forced = engine.mandatory_override(decision)
+
+    assert decision.approved is False
+    assert forced.approved is True
+    assert forced.max_order_contracts == 1
+    assert "mandatory_session_entry_override" in forced.reasons
+
+
+def test_mandatory_override_keeps_hard_halt() -> None:
+    cfg = BotConfig(mandatory_session_entry=True, mandatory_entry_contracts=1)
+    engine = RiskEngine(cfg)
+    signal = SignalDecision("taker", "yes", 0.6, 60.0, ["mandatory_session_entry"])
+    health = HealthState(ws_healthy=True, rest_latency_ms=50, consecutive_api_errors=0)
+
+    decision = engine.evaluate(
+        _snap(),
+        signal,
+        health,
+        _risk_state(realized_pnl_usd=-100.0, unrealized_pnl_usd=0.0),
+    )
+    forced = engine.mandatory_override(decision)
+
+    assert decision.halt is True
+    assert forced.approved is False
+    assert forced.halt is True

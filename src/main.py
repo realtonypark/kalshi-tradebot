@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -16,9 +17,9 @@ from src.kalshi.client import KalshiClient
 from src.kalshi.ws import KalshiWsFeed
 from src.logging_setup import setup_logging
 from src.market_data.btc_spot import BtcSpotFeed
-from src.market_data.btc_ta import BtcTechnicalFeed
+from src.market_data.btc_ta import BtcTechnicalFeed, TAFeatures
 from src.market_locator import MarketLocator
-from src.models import Fill, HealthState, MarketSnapshot
+from src.models import Fill, HealthState, MarketSnapshot, SignalDecision
 from src.portfolio.state import PortfolioState
 from src.reporting.dashboard import Dashboard
 from src.risk.engine import PortfolioRiskState, RiskEngine
@@ -98,6 +99,10 @@ async def run_bot(cfg: BotConfig) -> None:
                 spot_price = ta_features.spot if ta_features is not None else await runtime.spot_feed.get_price()
                 signal = runtime.strategy.evaluate(snap, spot_price=spot_price, ta_features=ta_features)
                 portfolio.mark(snap)
+                net_side = portfolio.net_side(ticker)
+                force_entry = _should_force_session_entry(cfg, snap, net_side)
+                if force_entry:
+                    signal = _force_session_entry_signal(signal, snap, spot_price, ta_features)
 
                 risk_state = PortfolioRiskState(
                     gross_exposure_usd=portfolio.gross_exposure_usd(),
@@ -108,6 +113,8 @@ async def run_bot(cfg: BotConfig) -> None:
                     trading_started_at=portfolio.trading_started_at,
                 )
                 risk = risk_engine.evaluate(snap, signal, health, risk_state)
+                if force_entry:
+                    risk = risk_engine.mandatory_override(risk)
                 if risk.halt:
                     LOGGER.critical("risk halt triggered reasons=%s", ",".join(risk.reasons))
                     kill.trip()
@@ -136,7 +143,7 @@ async def run_bot(cfg: BotConfig) -> None:
                     )
                     runtime.last_skip_log = now
 
-                intents = router.build_intents(snap, signal, risk, portfolio.net_side(ticker))
+                intents = router.build_intents(snap, signal, risk, net_side)
                 result = await router.execute(intents)
                 await router.cancel_stale(max_age_sec=12)
 
@@ -212,6 +219,9 @@ def _build_instrument_runtime(cfg: BotConfig, seed_ticker: str) -> InstrumentRun
 
 def _asset_from_seed(seed_ticker: str) -> str:
     seed = seed_ticker.upper()
+    match = re.match(r"^KX([A-Z0-9]+)15M", seed)
+    if match:
+        return match.group(1)
     if "ETH" in seed:
         return "ETH"
     return "BTC"
@@ -432,6 +442,66 @@ def _extract_fill_fee_cents(order: dict[str, Any]) -> int:
         except (TypeError, ValueError):
             continue
     return 0
+
+
+def _should_force_session_entry(cfg: BotConfig, snap: MarketSnapshot, net_side: str) -> bool:
+    if not cfg.mandatory_session_entry:
+        return False
+    if net_side in {"yes", "no"}:
+        return False
+    if snap.close_time is None:
+        return False
+    now = datetime.now(timezone.utc)
+    time_to_close = (snap.close_time - now).total_seconds()
+    since_open = cfg.session_duration_sec - time_to_close
+    return 0 <= since_open <= cfg.session_start_entry_window_sec
+
+
+def _force_session_entry_signal(
+    signal: SignalDecision,
+    snap: MarketSnapshot,
+    spot_price: float | None,
+    ta_features: TAFeatures | None,
+) -> SignalDecision:
+    side = signal.side if signal.side in {"yes", "no"} else _fallback_direction(snap, spot_price, ta_features)
+    confidence = max(0.55, signal.confidence)
+    fair_yes = signal.fair_yes_price
+    if side == "yes":
+        fair_yes = max(fair_yes, float(snap.yes_ask))
+    else:
+        fair_yes = min(fair_yes, float(100 - snap.no_ask))
+    reasons = list(signal.reason_codes)
+    reasons.append("mandatory_session_entry")
+    if signal.side == "flat":
+        reasons.append("forced_side_from_fallback")
+    return SignalDecision(
+        mode="taker",
+        side=side,
+        confidence=confidence,
+        fair_yes_price=max(1.0, min(99.0, fair_yes)),
+        reason_codes=reasons,
+    )
+
+
+def _fallback_direction(snap: MarketSnapshot, spot_price: float | None, ta_features: TAFeatures | None) -> str:
+    if spot_price is not None and snap.price_to_beat is not None and snap.price_to_beat > 0:
+        return "yes" if spot_price >= snap.price_to_beat else "no"
+
+    if ta_features is not None:
+        votes = 0
+        votes += 1 if ta_features.ema_fast >= ta_features.ema_slow else -1
+        votes += 1 if ta_features.macd_hist >= 0 else -1
+        votes += 1 if ta_features.rsi >= 50 else -1
+        votes += 1 if ta_features.ema_fast_5m >= ta_features.ema_slow_5m else -1
+        votes += 1 if ta_features.macd_hist_5m >= 0 else -1
+        votes += 1 if ta_features.rsi_5m >= 50 else -1
+        votes += 1 if ta_features.ema_fast_15m >= ta_features.ema_slow_15m else -1
+        votes += 1 if ta_features.macd_hist_15m >= 0 else -1
+        votes += 1 if ta_features.rsi_15m >= 50 else -1
+        if votes != 0:
+            return "yes" if votes > 0 else "no"
+
+    return "yes" if snap.yes_ask <= snap.no_ask else "no"
 
 
 def parse_args() -> argparse.Namespace:

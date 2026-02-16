@@ -32,6 +32,11 @@ class EconomicsSnapshot:
 class RiskEngine:
     def __init__(self, cfg: BotConfig) -> None:
         self.cfg = cfg
+        self._mandatory_hard_blocks = {
+            "daily_drawdown_limit",
+            "api_error_streak",
+            "bet_cap_reached",
+        }
 
     def evaluate(
         self,
@@ -109,6 +114,20 @@ class RiskEngine:
             approved = False
 
         return RiskDecision(approved=approved, max_order_contracts=max_contracts, halt=halt, reasons=reasons)
+
+    def mandatory_override(self, decision: RiskDecision) -> RiskDecision:
+        if not self.cfg.mandatory_session_entry:
+            return decision
+        if decision.halt:
+            return decision
+        if any(reason in self._mandatory_hard_blocks for reason in decision.reasons):
+            return decision
+
+        forced_contracts = max(1, int(self.cfg.mandatory_entry_contracts))
+        max_contracts = max(1, min(max(1, decision.max_order_contracts), forced_contracts))
+        reasons = list(decision.reasons)
+        reasons.append("mandatory_session_entry_override")
+        return RiskDecision(approved=True, max_order_contracts=max_contracts, halt=False, reasons=reasons)
 
     def _compute_economics(self, snap: MarketSnapshot, signal: SignalDecision) -> EconomicsSnapshot:
         entry_price_cents = snap.yes_ask if signal.side == "yes" else snap.no_ask

@@ -29,8 +29,8 @@ class Dashboard:
             win_rate = portfolio.total_wins / portfolio.total_fills
 
         parts: list[str] = []
-        parts.append("=" * 86)
-        parts.append(f"Kalshi 15m Bot | {now} | market={ticker}")
+        parts.append("=" * 100)
+        parts.append(f"Prediction Market Trader | {now} | market={ticker}")
         parts.append(
             f"PnL realized={portfolio.realized_pnl_usd:+.2f} unrealized={portfolio.unrealized_pnl_usd:+.2f} net={net:+.2f}"
         )
@@ -75,7 +75,7 @@ class Dashboard:
         parts.append(
             f"Health rest_latency_ms={health.rest_latency_ms:.1f} api_error_streak={health.consecutive_api_errors}"
         )
-        parts.append("=" * 86)
+        parts.append("=" * 100)
         return "\n".join(parts)
 
     @staticmethod

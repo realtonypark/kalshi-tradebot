@@ -41,6 +41,8 @@ class BotConfig:
     entry_at_session_start_only: bool = True
     session_duration_sec: int = 900
     session_start_entry_window_sec: int = 120
+    mandatory_session_entry: bool = True
+    mandatory_entry_contracts: int = 1
     max_consecutive_api_errors: int = 5
     max_initial_order_contracts: int = 25
     maker_edge_cents: int = 2
@@ -164,6 +166,11 @@ def load_config(env_file: str = ".env.local", yaml_file: str | None = None) -> B
         session_start_entry_window_sec=int(
             env("SESSION_START_ENTRY_WINDOW_SEC", defaults.session_start_entry_window_sec)
         ),
+        mandatory_session_entry=_as_bool(
+            env("MANDATORY_SESSION_ENTRY", defaults.mandatory_session_entry),
+            defaults.mandatory_session_entry,
+        ),
+        mandatory_entry_contracts=int(env("MANDATORY_ENTRY_CONTRACTS", defaults.mandatory_entry_contracts)),
         max_consecutive_api_errors=int(env("MAX_CONSECUTIVE_API_ERRORS", defaults.max_consecutive_api_errors)),
         max_initial_order_contracts=int(env("MAX_INITIAL_ORDER_CONTRACTS", defaults.max_initial_order_contracts)),
         maker_edge_cents=int(env("MAKER_EDGE_CENTS", defaults.maker_edge_cents)),

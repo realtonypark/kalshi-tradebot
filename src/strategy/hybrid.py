@@ -193,7 +193,8 @@ class HybridStrategy:
         # Price-to-beat signal dominates for this contract.
         if spot_price is not None and snap.price_to_beat is not None and snap.price_to_beat > 0:
             gap = spot_price - snap.price_to_beat
-            gap_score = _clamp(gap / 22.0, -2.0, 2.0)
+            gap_bps = (gap / snap.price_to_beat) * 10000.0
+            gap_score = _clamp(gap_bps / 7.0, -2.0, 2.0)
             score += gap_score * 1.25
             reasons.append("price_to_beat_gap_up" if gap > 0 else "price_to_beat_gap_down")
 
@@ -201,43 +202,75 @@ class HybridStrategy:
         score += _clamp(micro.momentum / max(self.cfg.momentum_min_cents, 0.05), -1.5, 1.5) * 0.5
         score += _clamp(micro.imbalance, -1.0, 1.0) * 0.35
 
-        # Technical-analysis context from BTC 1m candles.
+        # Technical-analysis context from asset 1m candles.
         if self.cfg.use_technical_analysis and ta is not None:
             trend_sign = 1.0 if ta.ema_fast >= ta.ema_slow else -1.0
             macd_sign = 1.0 if ta.macd_hist >= 0 else -1.0
+            macd_mag = _clamp(ta.macd_hist_bps / 3.0, -1.2, 1.2)
             rsi_norm = _clamp((ta.rsi - 50.0) / 18.0, -1.5, 1.5)
-            mom_norm = _clamp(ta.momentum_5m / 18.0, -1.5, 1.5)
+            mom_norm = _clamp(ta.momentum_5m / 6.0, -1.6, 1.6)
             vol_penalty = _clamp(ta.volatility_1m * 1800.0, 0.0, 0.9)
 
             score += trend_sign * 0.35
             score += macd_sign * 0.30
+            score += macd_mag * 0.18
             score += rsi_norm * 0.20
             score += mom_norm * 0.25
             score -= copysign(vol_penalty, score) if score != 0 else 0.0
             reasons.extend(["ema_trend_1m", "macd_1m", "rsi_1m", "momentum_5m"])
 
+            macd_cross_1m = _cross_signal(ta.macd_hist_prev, ta.macd_hist)
+            if macd_cross_1m != 0:
+                score += macd_cross_1m * 0.30
+                reasons.append("macd_golden_cross_1m" if macd_cross_1m > 0 else "macd_death_cross_1m")
+            rsi_cross_1m = _cross_signal(ta.rsi_prev - 50.0, ta.rsi - 50.0)
+            if rsi_cross_1m != 0:
+                score += rsi_cross_1m * 0.20
+                reasons.append("rsi_golden_cross_1m" if rsi_cross_1m > 0 else "rsi_death_cross_1m")
+
             ema_fast_5m = ta.ema_fast_5m if ta.ema_fast_5m != 0 else ta.ema_fast
             ema_slow_5m = ta.ema_slow_5m if ta.ema_slow_5m != 0 else ta.ema_slow
             macd_5m_hist = ta.macd_hist_5m if ta.macd_hist_5m != 0 else ta.macd_hist
+            macd_5m_hist_bps = ta.macd_hist_5m_bps if ta.macd_hist_5m_bps != 0 else ta.macd_hist_bps
             rsi_5m = ta.rsi_5m if ta.rsi_5m != 50.0 else ta.rsi
             mom_5m_tf = ta.momentum_5m_tf if ta.momentum_5m_tf != 0 else ta.momentum_5m
             vol_5m = ta.volatility_5m if ta.volatility_5m > 0 else ta.volatility_1m
 
             trend_5 = 1.0 if ema_fast_5m >= ema_slow_5m else -1.0
             macd_5 = 1.0 if macd_5m_hist >= 0 else -1.0
+            macd_5_mag = _clamp(macd_5m_hist_bps / 3.0, -1.2, 1.2)
             rsi_5 = _clamp((rsi_5m - 50.0) / 16.0, -1.6, 1.6)
-            mom_5 = _clamp(mom_5m_tf / 28.0, -1.6, 1.6)
+            mom_5 = _clamp(mom_5m_tf / 8.0, -1.6, 1.6)
             vol_5_penalty = _clamp(vol_5m * 3500.0, 0.0, 0.8)
-            score_5m = (trend_5 * 0.55) + (macd_5 * 0.40) + (rsi_5 * 0.35) + (mom_5 * 0.45) - vol_5_penalty
+            score_5m = (
+                (trend_5 * 0.55) + (macd_5 * 0.30) + (macd_5_mag * 0.16) + (rsi_5 * 0.35) + (mom_5 * 0.45) - vol_5_penalty
+            )
+            macd_cross_5m = _cross_signal(ta.macd_hist_prev_5m, macd_5m_hist)
+            if macd_cross_5m != 0:
+                score_5m += macd_cross_5m * 0.40
+                reasons.append("macd_golden_cross_5m" if macd_cross_5m > 0 else "macd_death_cross_5m")
+            rsi_cross_5m = _cross_signal(ta.rsi_prev_5m - 50.0, rsi_5m - 50.0)
+            if rsi_cross_5m != 0:
+                score_5m += rsi_cross_5m * 0.25
+                reasons.append("rsi_golden_cross_5m" if rsi_cross_5m > 0 else "rsi_death_cross_5m")
             score += score_5m
             reasons.extend(["ema_trend_5m", "macd_5m", "rsi_5m", "momentum_5m_tf"])
 
             # 15m chart regime: stronger weighting for higher timeframe confirmation.
             trend_15 = 1.0 if ta.ema_fast_15m >= ta.ema_slow_15m else -1.0
             macd_15 = 1.0 if ta.macd_hist_15m >= 0 else -1.0
+            macd_15_mag = _clamp(ta.macd_hist_15m_bps / 3.0, -1.2, 1.2)
             rsi_15 = _clamp((ta.rsi_15m - 50.0) / 16.0, -1.6, 1.6)
-            mom_15 = _clamp(ta.momentum_15m / 45.0, -1.6, 1.6)
-            score_15m = (trend_15 * 0.70) + (macd_15 * 0.55) + (rsi_15 * 0.45) + (mom_15 * 0.55)
+            mom_15 = _clamp(ta.momentum_15m / 10.0, -1.6, 1.6)
+            score_15m = (trend_15 * 0.70) + (macd_15 * 0.40) + (macd_15_mag * 0.22) + (rsi_15 * 0.45) + (mom_15 * 0.55)
+            macd_cross_15m = _cross_signal(ta.macd_hist_prev_15m, ta.macd_hist_15m)
+            if macd_cross_15m != 0:
+                score_15m += macd_cross_15m * 0.55
+                reasons.append("macd_golden_cross_15m" if macd_cross_15m > 0 else "macd_death_cross_15m")
+            rsi_cross_15m = _cross_signal(ta.rsi_prev_15m - 50.0, ta.rsi_15m - 50.0)
+            if rsi_cross_15m != 0:
+                score_15m += rsi_cross_15m * 0.35
+                reasons.append("rsi_golden_cross_15m" if rsi_cross_15m > 0 else "rsi_death_cross_15m")
             score += score_15m
             reasons.extend(["ema_trend_15m", "macd_15m", "rsi_15m", "momentum_15m"])
 
@@ -274,3 +307,11 @@ class HybridStrategy:
 
 def _clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
+
+
+def _cross_signal(prev: float, curr: float) -> int:
+    if prev < 0 <= curr:
+        return 1
+    if prev > 0 >= curr:
+        return -1
+    return 0

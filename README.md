@@ -1,6 +1,6 @@
-# Kalshi BTC/ETH 15m Hybrid Bot
+# Kalshi BTC/ETH/SOL/XRP 15m Hybrid Bot
 
-Live-first trading bot for Kalshi BTC/ETH 15-minute up/down markets with strict risk controls, auto-roll, flat-file persistence, and a 5-second terminal dashboard.
+Live-first trading bot for Kalshi BTC/ETH/SOL/XRP 15-minute up/down markets with strict risk controls, auto-roll, flat-file persistence, and a 5-second terminal dashboard.
 
 ## Safety Notes
 
@@ -15,7 +15,7 @@ Live-first trading bot for Kalshi BTC/ETH 15-minute up/down markets with strict 
 2. Set real credentials in `.env.local`:
    - `KALSHI_API_KEY_ID`
    - `KALSHI_PRIVATE_KEY_PATH` or `KALSHI_PRIVATE_KEY_PEM`
-   - `MARKET_SEED_TICKERS` for multi-market trading (example: BTC + ETH)
+   - `MARKET_SEED_TICKERS` for multi-market trading (example: BTC + ETH + SOL + XRP)
 3. Install dependencies:
    - `python3 -m pip install -e ".[dev]"`
 
@@ -65,13 +65,15 @@ Some payload fields differ by endpoint version. The client normalizes common alt
 
 ## 15m Directional Signal
 
-- The bot now prioritizes `price_to_beat` + live BTC/ETH spot to decide `YES` (up) vs `NO` (down).
-- It can run multiple 15m markets in parallel from `MARKET_SEED_TICKERS` (e.g., BTC + ETH).
+- The bot now prioritizes `price_to_beat` + live spot to decide `YES` (up) vs `NO` (down).
+- It can run multiple 15m markets in parallel from `MARKET_SEED_TICKERS` (e.g., BTC + ETH + SOL + XRP).
 - It only places directional taker entries when confidence and edge clear thresholds.
 - It uses multi-timeframe confirmation (`1m + 5m + 15m`) and can veto choppy regimes.
+- TA momentum/gap/MACD magnitude are normalized in bps for better cross-asset behavior.
 - Directional fair value is probability-calibrated before EV/sizing checks.
 - The directional entry can require 15m chart alignment (higher-timeframe regime filter).
 - It can trade only at session start (first part of each new 15-minute market).
+- Mandatory mode can force one entry attempt per BTC/ETH 15m session, even when soft filters disagree.
 - It blocks trades with weak payout/EV after estimated fees.
 - Position size is EV/Kelly-aware and still bounded by strict hard caps.
 - You can tune in `.env.local`:
@@ -93,6 +95,8 @@ Some payload fields differ by endpoint version. The client normalizes common alt
   - `PROBABILITY_SHRINK`
   - `ENTRY_AT_SESSION_START_ONLY`
   - `SESSION_START_ENTRY_WINDOW_SEC`
+  - `MANDATORY_SESSION_ENTRY`
+  - `MANDATORY_ENTRY_CONTRACTS`
   - `MIN_WIN_PROFIT_CENTS`
   - `MIN_EXPECTED_VALUE_CENTS`
   - `ASSUMED_SLIPPAGE_CENTS`
